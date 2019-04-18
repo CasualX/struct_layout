@@ -1,3 +1,7 @@
+/*!
+
+ */
+
 use std::vec;
 use std::str::FromStr;
 
@@ -7,11 +11,6 @@ use proc_macro::*;
 //----------------------------------------------------------------
 // Definitions
 
-#[derive(Copy, Clone, Debug)]
-enum LayoutKind {
-	Explicit,
-}
-
 #[derive(Clone, Debug)]
 struct KeyValue {
 	ident: Ident,
@@ -20,8 +19,7 @@ struct KeyValue {
 }
 
 #[derive(Clone, Debug)]
-struct StructLayout {
-	kind: LayoutKind,
+struct ExplicitLayout {
 	size: usize,
 	align: usize,
 	check: Option<String>,
@@ -60,7 +58,7 @@ struct Vis(Vec<TokenTree>);
 struct Structure {
 	attrs: Vec<Attribute>,
 	derived: Vec<DerivedTrait>,
-	layout: StructLayout,
+	layout: ExplicitLayout,
 	vis: Vis,
 	stru: Ident,
 	name: Ident,
@@ -268,11 +266,9 @@ fn parse_ty(tokens: &mut vec::IntoIter<TokenTree>) -> Type {
 //----------------------------------------------------------------
 // Parse struct layout attribute
 
-fn parse_struct_layout(tokens: TokenStream) -> StructLayout {
+fn parse_explicit_layout(tokens: TokenStream) -> ExplicitLayout {
 	let tokens: Vec<TokenTree> = tokens.into_iter().collect();
 	let mut tokens = tokens.into_iter();
-	let kind = parse_layout_kind(&mut tokens);
-	parse_layout_comma(&mut tokens);
 	let size = parse_layout_size(&mut tokens);
 	parse_layout_comma(&mut tokens);
 	let align = parse_layout_align(&mut tokens);
@@ -280,18 +276,7 @@ fn parse_struct_layout(tokens: TokenStream) -> StructLayout {
 	let check = parse_layout_check(&mut tokens);
 	parse_layout_comma(&mut tokens);
 	parse_layout_end(&mut tokens);
-	StructLayout { kind, size, align, check }
-}
-fn parse_layout_kind(tokens: &mut vec::IntoIter<TokenTree>) -> LayoutKind {
-	match tokens.next() {
-		Some(TokenTree::Ident(ident)) => {
-			match &*ident.to_string() {
-				"explicit" => LayoutKind::Explicit,
-				s => panic!("parse struct_layout: unknown ident for LayoutKind `{}`, expecting `explicit`", s),
-			}
-		},
-		_ => panic!("parse struct_layout: invalid tokens for LayoutKind, expecting ident `explicit`"),
-	}
+	ExplicitLayout { size, align, check }
 }
 fn parse_layout_size(tokens: &mut vec::IntoIter<TokenTree>) -> usize {
 	let attr_value = match parse_kv(tokens) {
@@ -438,7 +423,7 @@ fn parse_field_layout(tokens: &mut vec::IntoIter<TokenTree>) -> FieldLayout {
 //----------------------------------------------------------------
 // Parse structure
 
-fn parse_structure(tokens: TokenStream, layout: StructLayout) -> Structure {
+fn parse_structure(tokens: TokenStream, layout: ExplicitLayout) -> Structure {
 	let tokens: Vec<TokenTree> = tokens.into_iter().collect();
 	let mut tokens = tokens.into_iter();
 	let mut attrs = parse_attrs(&mut tokens);
@@ -515,8 +500,8 @@ fn parse_structure_attrs(attrs: &mut Vec<Attribute>) -> Vec<DerivedTrait> {
 //----------------------------------------------------------------
 
 #[proc_macro_attribute]
-pub fn struct_layout(attributes: TokenStream, input: TokenStream) -> TokenStream {
-	let layout = parse_struct_layout(attributes);
+pub fn explicit(attributes: TokenStream, input: TokenStream) -> TokenStream {
+	let layout = parse_explicit_layout(attributes);
 	let stru = parse_structure(input, layout);
 	// Emit the code
 	let mut code: Vec<TokenTree> = Vec::new();
@@ -712,10 +697,9 @@ fn emit_field_mut(code: &mut Vec<TokenTree>, stru: &Structure, field: &Field) {
 	});
 }
 fn emit_field_check(code: &mut Vec<TokenTree>, stru: &Structure, field: &Field) {
-	if let Some(check) = &stru.layout.check {
-		emit_ident(code, "where");
-		emit_ty(code, &field.ty);
-		emit_punct(code, ':');
-		emit_text(code, check);
-	}
+	let check = stru.layout.check.as_ref().map(std::ops::Deref::deref).unwrap_or("Copy + 'static");
+	emit_ident(code, "where");
+	emit_ty(code, &field.ty);
+	emit_punct(code, ':');
+	emit_text(code, check);
 }
