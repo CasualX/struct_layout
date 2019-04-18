@@ -3,5 +3,14 @@ name = "struct_layout"
 version = "0.1.0"
 edition = "2018"
 
+authors = ["Casper <CasualX@users.noreply.github.com>"]
+description = "Customize your struct layout with this one weird trick."
+documentation = "https://docs.rs/struct_layout"
+repository = "https://github.com/CasualX/struct_layout"
+readme = "readme.md"
+
+keywords = ["explicit", "struct", "layout"]
+categories = []
+
 [lib]
 proc-macro = true

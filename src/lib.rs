@@ -1,4 +1,74 @@
 /*!
+Learn by example, for a detailed description see the readme.
+
+# Examples
+
+Most simple example, specify the required size and alignment and annotate the fields with an offset.
+Use `zeroed` to create an instance and use the generated accessors to access the field.
+
+```
+#[struct_layout::explicit(size = 16, align = 4)]
+struct Foo {
+	#[field(offset = 4)]
+	field: i32,
+}
+
+let mut foo: Foo = unsafe { std::mem::zeroed() };
+
+foo.set_field(13);
+assert_eq!(foo.field(), 13);
+
+*foo.field_mut() = 42;
+assert_eq!(foo.field_ref(), &42);
+```
+
+## Auto derive traits
+
+Minimal set of whitelisted auto derived traits are supported.
+
+Don't forget you can implement additional methods and traits on the generated type!
+
+```
+#[struct_layout::explicit(size = 16, align = 4)]
+#[derive(Copy, Clone, Debug, Default)]
+struct Foo {
+	#[field(offset = 4)]
+	field: char,
+}
+
+let mut foo = Foo::default().clone();
+let _ = foo;
+foo.set_field('a');
+assert_eq!(format!("{:?}", foo), "Foo { field: 'a' }");
+```
+
+## Check argument to ensure safety
+
+The check attribute requires that all fields meet this trait bound.
+It is meant to support custom pod-like traits to ensure safe usage of the explicit attribute.
+
+```
+unsafe trait Pod {}
+unsafe impl Pod for i32 {}
+
+#[struct_layout::explicit(size = 16, align = 4, check(Pod))]
+struct Foo {
+	#[field(offset = 4)]
+	field: i32,
+}
+```
+
+## Unaligned fields
+
+Annotate a field with `get` or `set` accessors allows unaligned fields.
+
+```
+#[struct_layout::explicit(size = 16, align = 4)]
+struct Foo {
+	#[field(offset = 3, get, set)]
+	field: i64,
+}
+```
 
  */
 
@@ -490,6 +560,7 @@ fn parse_structure_attrs(attrs: &mut Vec<Attribute>) -> Vec<DerivedTrait> {
 
 //----------------------------------------------------------------
 
+/// Explicit field layout attribute.
 #[proc_macro_attribute]
 pub fn explicit(attributes: TokenStream, input: TokenStream) -> TokenStream {
 	let layout = parse_explicit_layout(attributes);
@@ -711,3 +782,79 @@ fn emit_field_check(code: &mut Vec<TokenTree>, stru: &Structure, field: &Field) 
 	emit_punct(code, ':');
 	emit_text(code, check);
 }
+
+/// The following are incorrect usage of the explicit attribute.
+///
+/// ```compile_fail
+/// #[struct_layout::explicit]
+/// struct Foo {}
+/// ```
+///
+/// Missing required arguments.
+///
+/// ```compile_fail
+/// #[struct_layout::explicit(size = 8, align = 4)]
+/// enum Foo {}
+/// ```
+///
+/// The explicit attribute only works on struct definitions.
+///
+/// ```compile_fail
+/// #[struct_layout::explicit(size = 8, align = 4)]
+/// struct Foo {
+/// 	field: i32,
+/// }
+/// ```
+///
+/// All fields must have exactly one `#[field]` attribute.
+///
+/// ```compile_fail
+/// #[struct_layout::explicit(size = 8, align = 4)]
+/// struct Foo {
+/// 	#[field(offset = 1)]
+/// 	field: i64,
+/// }
+/// ```
+///
+/// Field does not meet alignment requirements.
+///
+/// ```compile_fail
+/// #[struct_layout::explicit(size = 8, align = 4)]
+/// struct Foo {
+/// 	#[field(offset = 5, get, set)]
+/// 	field: i32,
+/// }
+/// ```
+///
+/// Field out of bounds.
+///
+/// ```compile_fail
+/// unsafe trait Pod {}
+///
+/// #[struct_layout::explicit(size = 8, align = 4, check(Pod))]
+/// struct Foo {
+/// 	#[field(offset = 4)]
+/// 	field: i32,
+/// }
+/// ```
+///
+/// Field type does not satisfy Pod constraint.
+///
+/// ```compile_fail
+/// #[struct_layout::explicit(size = 8, align = 4)]
+/// #[repr(C)]
+/// struct Foo {}
+/// ```
+///
+/// ```compile_fail
+/// #[struct_layout::explicit(size = 8, align = 4)]
+/// struct Foo {
+/// 	#[field(offset = 4)]
+/// 	#[allow(bad_style)]
+/// 	Field: i32,
+/// }
+/// ```
+///
+/// Unsupported attributes.
+#[allow(dead_code)]
+fn compile_fail() {}

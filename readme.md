@@ -1,7 +1,25 @@
 Struct layout
 =============
 
+[![MIT License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![crates.io](https://img.shields.io/crates/v/struct_layout.svg)](https://crates.io/crates/struct_layout)
+[![docs.rs](https://docs.rs/struct_layout/badge.svg)](https://docs.rs/struct_layout)
+
 Customize your struct layout with explicit control over the fields.
+
+Usage
+-----
+
+This proc-macro is available on [crates.io](https://crates.io/crates/struct_layout).
+
+Documentation can be found on [docs.rs](https://docs.rs/struct_layout/).
+
+In your Cargo.toml, put
+
+```
+[dependencies]
+struct_layout = "0.1"
+```
 
 Examples
 --------
@@ -10,11 +28,11 @@ Apply the `#[struct_layout::explicit]` attribute to a struct definition and put 
 
 ```rust
 /// Doc comments are allowed.
-#[struct_layout::explicit(size = 64, align = 4, check(Copy))]
+#[struct_layout::explicit(size = 32, align = 4)]
 #[derive(Copy, Clone, Debug, Default)]
-pub struct A {
-	#[field(offset = 1, get, set)]
-	pub unaligned: u16,
+pub struct Foo {
+	#[field(offset = 21, get, set)]
+	pub unaligned: f32,
 
 	/// Documenting the fields works too.
 	#[field(offset = 4)]
@@ -31,7 +49,7 @@ This attribute must be applied to a struct definition, the attribute arguments o
 The size and alignment of the structure are required and follow the format `size = <usize>` and `align = <usize>`.
 
 Following is an optional `check(..)` argument which specifies a trait bound which all field members must implement.
-This allows a custom trait to guarantee that all field types are safe to be used. If absent all fields are required to implement `Copy + 'static`.
+This allows a custom trait to guarantee that all field types are safe to be used. If absent all fields are required to implement `Copy`.
 
 ### Additional attributes
 
@@ -47,11 +65,20 @@ The structure is adorned by the `C` and `align` representation with the alignmen
 The visibility specified is applied to the generated structure.
 Any doc comments are also added.
 
+Basically, this:
+
+```rust
+/// Doc comments are allowed.
+#[repr(C, align(4))]
+pub struct Foo([u8; 64]);
+```
+
 ### Supported auto derived traits
 
 The only supported traits to be auto derived are `Copy`, `Clone`, `Debug` and `Default`.
-
 Future extensions may allow more traits to be supported.
+
+Don't forget you can implement additional methods and traits on the generated type!
 
 ### Structure field syntax
 
@@ -61,12 +88,12 @@ The field attribute must start with specifying the offset of the field using `of
 Followed by a list of methods for how to implement access to the field.
 
 Supported methods are `get`, `set`, `ref` or `mut`. If no methods are specified, they will all be implemented for this field.
-The accessor methods optionally add a where clause requiring the field type to implement the `check` trait specified in the `struct_layout::explicit` attribute.
+The accessor methods have where clause requiring the field type to implement the trait specified by the `check` argument of the `struct_layout::explicit` attribute.
 
 The accessors are implemented via methods with the following signatures:
 
 * get: `fn field(&self) -> T`
-* set: `fn set_field(&mut self, value: T)`
+* set: `fn set_field(&mut self, value: T) -> &mut Self`
 * ref: `fn field_ref(&self) -> &T`
 * mut: `fn field_mut(&mut self) -> &mut T`
 
@@ -77,10 +104,10 @@ This is unfortunate due to how these constraints are statically asserted (using 
 
 ### Safety
 
-All fields are required to implement `Copy + 'static` or the trait bound specified by the `check` argument.
+All fields are required to implement `Copy` or the trait bound specified by the `check` argument.
 This restriction makes things safer, but by no means perfect. By using this library you commit to not doing stupid things and perhaps drop an issue in the bugtracker where safety can be improved.
 
-Under no circumstance should a field be allowed to implement `Drop` or be anything but `'static`. It is not supported.
+Under no circumstance should a field be allowed to implement `Drop` or be a reference type. It is not supported.
 
 ### How to construct an instance
 
