@@ -9,12 +9,14 @@ Examples
 Apply the `#[struct_layout::explicit]` attribute to a struct definition and put `#[field]` attributes on every field declaration.
 
 ```rust
+/// Doc comments are allowed.
 #[struct_layout::explicit(size = 64, align = 4, check(Copy))]
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Default)]
 pub struct A {
 	#[field(offset = 1, get, set)]
 	pub unaligned: u16,
 
+	/// Documenting the fields works too.
 	#[field(offset = 4)]
 	pub int: i32,
 }
@@ -47,7 +49,7 @@ Any doc comments are also added.
 
 ### Supported auto derived traits
 
-The only supported traits to be auto derived are `Copy`, `Clone` and `Debug`.
+The only supported traits to be auto derived are `Copy`, `Clone`, `Debug` and `Default`.
 
 Future extensions may allow more traits to be supported.
 
@@ -82,9 +84,10 @@ Under no circumstance should a field be allowed to implement `Drop` or be anythi
 
 ### How to construct an instance
 
-Currently no constructor is provided, use the unsafe `std::mem::zeroed` to create a zero initialized instance if this makes sense.
+If requested the `Default` trait may be auto derived filling in the fields with their type's default value.
+You may add additional associated methods to the generated structure.
 
-It is possible to add constructors or traits like `Default` by manually implementing them on the generated struct.
+It is also possible to use the unsafe `std::mem::zeroed` to create a zero initialized instance if this makes sense.
 
 ### Compatibility with no_std
 

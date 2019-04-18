@@ -1,11 +1,13 @@
 
 /// Hello world.
-#[struct_layout::explicit(size = 8, align = 4, check(Copy))]
-#[derive(Copy, Clone, Debug)]
-pub struct Test {
-	/// Docstring
+#[struct_layout::explicit(size = 64, align = 4, check(Copy))]
+#[derive(Copy, Clone, Debug, Default)]
+pub struct A {
 	#[field(offset = 1, get, set)]
-	pub field: i32,
+	pub unaligned: u16,
+
+	#[field(offset = 4)]
+	pub int: i32,
 }
 
 #[test]

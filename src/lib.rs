@@ -3,7 +3,6 @@
  */
 
 use std::vec;
-use std::str::FromStr;
 
 extern crate proc_macro;
 use proc_macro::*;
@@ -48,7 +47,7 @@ struct Attribute {
 
 #[derive(Copy, Clone, Debug)]
 enum DerivedTrait {
-	Copy, Clone, Debug
+	Copy, Clone, Debug, Default
 }
 
 #[derive(Clone, Debug)]
@@ -123,15 +122,6 @@ fn parse_punct(tokens: &mut vec::IntoIter<TokenTree>, punct: char) -> Option<Pun
 	}
 	match tokens.next() {
 		Some(TokenTree::Punct(punct)) => Some(punct),
-		_ => unreachable!(),
-	}
-}
-fn parse_literal<T: FromStr>(tokens: &mut vec::IntoIter<TokenTree>) -> Option<Result<T, T::Err>> {
-	if !is_literal(tokens.as_slice()) {
-		return None;
-	}
-	match tokens.next() {
-		Some(TokenTree::Literal(lit)) => Some(lit.to_string().parse()),
 		_ => unreachable!(),
 	}
 }
@@ -480,6 +470,7 @@ fn parse_structure_attrs(attrs: &mut Vec<Attribute>) -> Vec<DerivedTrait> {
 								"Copy" => result.push(DerivedTrait::Copy),
 								"Clone" => result.push(DerivedTrait::Clone),
 								"Debug" => result.push(DerivedTrait::Debug),
+								"Default" => result.push(DerivedTrait::Default),
 								s => panic!("derive attribute: unsupported trait: `{}`", s),
 							}
 						}
@@ -561,20 +552,22 @@ fn emit_impl_f(code: &mut Vec<TokenTree>, ident: &Ident, f: impl FnOnce(&mut Vec
 		tokens.into_iter().collect()
 	})));
 }
-fn emit_trait_impl_f(code: &mut Vec<TokenTree>, ident: &Ident, fields: &[Field], tr: &str, f: impl FnOnce(&mut Vec<TokenTree>)) {
-	code.push(TokenTree::Ident(Ident::new("impl", Span::call_site())));
-	emit_text(code, tr);
-	code.push(TokenTree::Ident(Ident::new("for", Span::call_site())));
-	code.push(TokenTree::Ident(ident.clone()));
-	// Emit trait bounds for all the element types
-	if fields.len() > 0 {
+fn emit_trait_bounds(code: &mut Vec<TokenTree>, stru: &Structure, tr: &str) {
+	if stru.fields.len() > 0 {
 		emit_ident(code, "where");
 		let bound = format!(": {},", tr);
-		for field in fields {
+		for field in &stru.fields {
 			emit_ty(code, &field.ty);
 			emit_text(code, &bound);
 		}
 	}
+}
+fn emit_trait_impl_f(code: &mut Vec<TokenTree>, stru: &Structure, tr: &str, f: impl FnOnce(&mut Vec<TokenTree>)) {
+	code.push(TokenTree::Ident(Ident::new("impl", Span::call_site())));
+	emit_text(code, tr);
+	code.push(TokenTree::Ident(Ident::new("for", Span::call_site())));
+	code.push(TokenTree::Ident(stru.name.clone()));
+	emit_trait_bounds(code, stru, tr);
 	code.push(TokenTree::Group(Group::new(Delimiter::Brace, {
 		let mut tokens = Vec::new();
 		f(&mut tokens);
@@ -582,20 +575,20 @@ fn emit_trait_impl_f(code: &mut Vec<TokenTree>, ident: &Ident, fields: &[Field],
 	})));
 }
 
-fn emit_derive_copy(code: &mut Vec<TokenTree>, name: &Ident, fields: &[Field]) {
-	emit_trait_impl_f(code, name, fields, "Copy", |_| {});
+fn emit_derive_copy(code: &mut Vec<TokenTree>, stru: &Structure) {
+	emit_trait_impl_f(code, stru, "Copy", |_| {});
 }
-fn emit_derive_clone(code: &mut Vec<TokenTree>, name: &Ident, fields: &[Field]) {
-	emit_trait_impl_f(code, name, fields, "Clone", |code| {
+fn emit_derive_clone(code: &mut Vec<TokenTree>, stru: &Structure) {
+	emit_trait_impl_f(code, stru, "Clone", |code| {
 		emit_text(code, "fn clone(&self) -> Self { *self }");
 	})
 }
-fn emit_derive_debug(code: &mut Vec<TokenTree>, name: &Ident, fields: &[Field]) {
-	emit_trait_impl_f(code, name, fields, "::core::fmt::Debug", |code| {
+fn emit_derive_debug(code: &mut Vec<TokenTree>, stru: &Structure) {
+	emit_trait_impl_f(code, stru, "::core::fmt::Debug", |code| {
 		emit_text(code, "fn fmt(&self, f: &mut ::core::fmt::Formatter) -> ::core::fmt::Result");
 		emit_group_f(code, Delimiter::Brace, |code| {
-			emit_text(code, &format!("f.debug_struct(\"{}\")", name));
-			for field in fields {
+			emit_text(code, &format!("f.debug_struct(\"{}\")", &stru.name));
+			for field in &stru.fields {
 				if field.layout.method_ref {
 					emit_text(code, &format!(".field(\"{0}\", self.{0}_ref())", field.name));
 				}
@@ -607,12 +600,25 @@ fn emit_derive_debug(code: &mut Vec<TokenTree>, name: &Ident, fields: &[Field]) 
 		});
 	});
 }
+fn emit_derive_default(code: &mut Vec<TokenTree>, stru: &Structure) {
+	emit_trait_impl_f(code, stru, "Default", |code| {
+		emit_text(code, "fn default() -> Self");
+		emit_group_f(code, Delimiter::Brace, |code| {
+			emit_text(code, "let mut instance: Self = unsafe { ::core::mem::zeroed() };");
+			for field in &stru.fields {
+				emit_text(code, &format!("instance.set_{}(Default::default());", field.name));
+			}
+			emit_text(code, "; instance");
+		});
+	});
+}
 fn emit_derives(code: &mut Vec<TokenTree>, stru: &Structure) {
 	for derive in &stru.derived {
 		match derive {
-			DerivedTrait::Copy => emit_derive_copy(code, &stru.name, &stru.fields),
-			DerivedTrait::Clone => emit_derive_clone(code, &stru.name, &stru.fields),
-			DerivedTrait::Debug => emit_derive_debug(code, &stru.name, &stru.fields),
+			DerivedTrait::Copy => emit_derive_copy(code, stru),
+			DerivedTrait::Clone => emit_derive_clone(code, stru),
+			DerivedTrait::Debug => emit_derive_debug(code, stru),
+			DerivedTrait::Default => emit_derive_default(code, stru),
 		}
 	}
 }
@@ -655,6 +661,7 @@ fn emit_field_set(code: &mut Vec<TokenTree>, stru: &Structure, field: &Field) {
 		emit_text(params, "&mut self, value: ");
 		emit_ty(params, &field.ty);
 	});
+	emit_text(code, " -> &mut Self");
 	emit_field_check(code, stru, field);
 	emit_group_f(code, Delimiter::Brace, |body| {
 		emit_text(body, &format!("const FIELD_OFFSET: usize = {};", field.layout.offset));
@@ -662,6 +669,7 @@ fn emit_field_set(code: &mut Vec<TokenTree>, stru: &Structure, field: &Field) {
 		emit_text(body, "; use ::core::{mem, ptr}; let _: [();
 			(FIELD_OFFSET + mem::size_of::<FieldT>() <= mem::size_of::<Self>()) as usize - 1];");
 		emit_text(body, "unsafe { ptr::write_unaligned((self as *mut _ as *mut u8).offset(FIELD_OFFSET as isize) as *mut FieldT, value); }");
+		emit_ident(body, "self");
 	})
 }
 fn emit_field_ref(code: &mut Vec<TokenTree>, stru: &Structure, field: &Field) {
