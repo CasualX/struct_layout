@@ -84,19 +84,19 @@ use proc_macro::*;
 struct KeyValue {
 	ident: Ident,
 	punct: Punct,
-	value: Literal,
+	value: Expr,
 }
 
 #[derive(Clone, Debug)]
 struct ExplicitLayout {
-	size: usize,
-	align: usize,
+	size: Expr,
+	align: Expr,
 	check: Option<String>,
 }
 
 #[derive(Clone, Debug)]
 struct FieldLayout {
-	offset: usize,
+	offset: Expr,
 	method_get: bool,
 	method_set: bool,
 	method_ref: bool,
@@ -136,6 +136,8 @@ struct Structure {
 
 #[derive(Clone, Debug)]
 struct Type(Vec<TokenTree>);
+#[derive(Clone, Debug)]
+struct Expr(TokenStream);
 
 #[derive(Clone, Debug)]
 struct Field {
@@ -164,12 +166,6 @@ fn is_keyword(tokens: &[TokenTree], name: &str) -> bool {
 fn is_punct(tokens: &[TokenTree], chr: char) -> bool {
 	match tokens.first() {
 		Some(TokenTree::Punct(punct)) => punct.as_char() == chr,
-		_ => false,
-	}
-}
-fn is_literal(tokens: &[TokenTree]) -> bool {
-	match tokens.first() {
-		Some(TokenTree::Literal(_)) => true,
 		_ => false,
 	}
 }
@@ -253,10 +249,10 @@ fn parse_meta(tokens: &mut vec::IntoIter<TokenTree>) -> Option<Meta> {
 	};
 	Some(Meta { ident, args })
 }
-// $ident = $literal
+// $ident = $expr ,
 fn parse_kv(tokens: &mut vec::IntoIter<TokenTree>) -> Option<KeyValue> {
 	let slice = tokens.as_slice();
-	if !(is_ident(&slice[0..]) && is_punct(&slice[1..], '=') && is_literal(&slice[2..])) {
+	if !(is_ident(&slice[0..]) && is_punct(&slice[1..], '=')) {
 		return None;
 	}
 	let ident = match tokens.next() {
@@ -267,10 +263,7 @@ fn parse_kv(tokens: &mut vec::IntoIter<TokenTree>) -> Option<KeyValue> {
 		Some(TokenTree::Punct(punct)) => punct,
 		_ => unreachable!(),
 	};
-	let value = match tokens.next() {
-		Some(TokenTree::Literal(literal)) => literal,
-		_ => unreachable!(),
-	};
+	let value = parse_expr(tokens);
 	Some(KeyValue { ident, punct, value })
 }
 // # $group
@@ -315,7 +308,7 @@ fn parse_ty(tokens: &mut vec::IntoIter<TokenTree>) -> Type {
 		match tokens.next() {
 			Some(TokenTree::Punct(punct)) => {
 				match punct.as_char() {
-					',' if depth == 0 => break,
+					',' | ';' if depth == 0 => break,
 					'<' => depth += 1,
 					'>' => depth -= 1,
 					_ => (),
@@ -327,6 +320,23 @@ fn parse_ty(tokens: &mut vec::IntoIter<TokenTree>) -> Type {
 		}
 	}
 	Type(ty)
+}
+// $($tt)*,
+fn parse_expr(tokens: &mut vec::IntoIter<TokenTree>) -> Expr {
+	let mut expr = Vec::new();
+	loop {
+		match tokens.next() {
+			Some(TokenTree::Punct(punct)) => {
+				if let ',' | ';' = punct.as_char() {
+					break;
+				}
+				expr.push(TokenTree::Punct(punct));
+			},
+			Some(tt) => expr.push(tt),
+			None => break,
+		}
+	}
+	Expr(expr.into_iter().collect())
 }
 
 //----------------------------------------------------------------
@@ -341,31 +351,23 @@ fn parse_explicit_layout(tokens: TokenStream) -> ExplicitLayout {
 	parse_layout_end(&mut tokens);
 	ExplicitLayout { size, align, check }
 }
-fn parse_layout_size(tokens: &mut vec::IntoIter<TokenTree>) -> usize {
-	let attr_value = match parse_kv(tokens) {
-		Some(kv) => kv,
+fn parse_layout_size(tokens: &mut vec::IntoIter<TokenTree>) -> Expr {
+	let size = match parse_kv(tokens) {
+		Some(kv) => {
+			if kv.ident.to_string() == "size" { kv.value }
+			else { panic!("parse struct_layout: invalid format for size argument, expecting `size = <usize>`") }
+		},
 		None => panic!("parse struct_layout: invalid format for size argument, expecting `size = <usize>`"),
-	};
-	if let None = parse_comma(tokens) {
-		panic!("parse struct_layout: invalid format for size argument, expecting `size = <usize>`");
-	}
-	let size = match attr_value.value.to_string().parse::<usize>() {
-		Ok(ok) => ok,
-		Err(err) => panic!("parse struct_layout: error parsing size argument: {}", err),
 	};
 	size
 }
-fn parse_layout_align(tokens: &mut vec::IntoIter<TokenTree>) -> usize {
-	let attr_value = match parse_kv(tokens) {
-		Some(kv) => kv,
+fn parse_layout_align(tokens: &mut vec::IntoIter<TokenTree>) -> Expr {
+	let align = match parse_kv(tokens) {
+		Some(kv) => {
+			if kv.ident.to_string() == "align" { kv.value }
+			else { panic!("parse struct_layout: invalid format for align argument, expecting `align = <usize>`") }
+		},
 		None => panic!("parse struct_layout: invalid format for align argument, expecting `align = <usize>`"),
-	};
-	if let None = parse_comma(tokens) {
-		panic!("parse struct_layout: invalid format for align argument, expecting `align = <usize>`");
-	}
-	let align = match attr_value.value.to_string().parse::<usize>() {
-		Ok(ok) => ok,
-		Err(err) => panic!("parse struct_layout: error parsing align argument: {}", err),
 	};
 	align
 }
@@ -447,16 +449,12 @@ fn parse_field_attrs(attrs: &mut Vec<Attribute>) -> Option<FieldLayout> {
 }
 fn parse_field_layout(tokens: &mut vec::IntoIter<TokenTree>) -> FieldLayout {
 	let offset = match parse_kv(tokens) {
-		Some(offset) => offset,
+		Some(kv) => {
+			if kv.ident.to_string() == "offset" { kv.value }
+			else { panic!("parse field_layout: invalid format for offset argument, expecting `offset = <usize>`") }
+		},
 		None => panic!("parse field_layout: invalid format for offset argument, expecting `offset = <usize>`"),
 	};
-	let offset = match offset.value.to_string().parse::<usize>() {
-		Ok(offset) => offset,
-		Err(err) => panic!("parse field_layout: error parsing offset argument: {}", err),
-	};
-	if let None = parse_comma(tokens) {
-		panic!("parse field_layout: expecting comma separated list");
-	}
 	let mut method_get = false;
 	let mut method_set = false;
 	let mut method_ref = false;
@@ -581,11 +579,11 @@ pub fn explicit(attributes: TokenStream, input: TokenStream) -> TokenStream {
 	// Emit the code
 	let mut code: Vec<TokenTree> = Vec::new();
 	emit_attrs(&mut code, &stru.attrs);
-	emit_text(&mut code, &format!("#[repr(C, align({}))]", stru.layout.align));
+	emit_text(&mut code, &format!("#[repr(C, align({}))]", stru.layout.align.0));
 	emit_vis(&mut code, &stru.vis);
 	code.push(TokenTree::Ident(stru.stru.clone()));
 	code.push(TokenTree::Ident(stru.name.clone()));
-	emit_text(&mut code, &format!("([u8; {}]);", stru.layout.size));
+	emit_text(&mut code, &format!("([u8; {}]);", stru.layout.size.0));
 	emit_impl_f(&mut code, &stru.name, |body| {
 		for field in &stru.fields {
 			emit_field(body, &stru, field);
@@ -729,7 +727,7 @@ fn emit_field_get(code: &mut Vec<TokenTree>, stru: &Structure, field: &Field) {
 	emit_ty(code, &field.ty);
 	emit_field_check(code, stru, field);
 	emit_group_f(code, Delimiter::Brace, |body| {
-		emit_text(body, &format!("const FIELD_OFFSET: usize = {};", field.layout.offset));
+		emit_text(body, &format!("const FIELD_OFFSET: usize = {};", field.layout.offset.0));
 		emit_text(body, "type FieldT = "); emit_ty(body, &field.ty);
 		emit_text(body, "; use ::core::{mem, ptr}; let _: [();
 			(FIELD_OFFSET + mem::size_of::<FieldT>() <= mem::size_of::<Self>()) as usize - 1];");
@@ -748,7 +746,7 @@ fn emit_field_set(code: &mut Vec<TokenTree>, stru: &Structure, field: &Field) {
 	emit_text(code, " -> &mut Self");
 	emit_field_check(code, stru, field);
 	emit_group_f(code, Delimiter::Brace, |body| {
-		emit_text(body, &format!("const FIELD_OFFSET: usize = {};", field.layout.offset));
+		emit_text(body, &format!("const FIELD_OFFSET: usize = {};", field.layout.offset.0));
 		emit_text(body, "type FieldT = "); emit_ty(body, &field.ty);
 		emit_text(body, "; use ::core::{mem, ptr}; let _: [();
 			(FIELD_OFFSET + mem::size_of::<FieldT>() <= mem::size_of::<Self>()) as usize - 1];");
@@ -763,7 +761,7 @@ fn emit_field_ref(code: &mut Vec<TokenTree>, stru: &Structure, field: &Field) {
 	emit_ty(code, &field.ty);
 	emit_field_check(code, stru, field);
 	emit_group_f(code, Delimiter::Brace, |body| {
-		emit_text(body, &format!("const FIELD_OFFSET: usize = {};", field.layout.offset));
+		emit_text(body, &format!("const FIELD_OFFSET: usize = {};", field.layout.offset.0));
 		emit_text(body, "type FieldT = "); emit_ty(body, &field.ty);
 		emit_text(body, "; use ::core::mem; let _: [();
 			(FIELD_OFFSET + mem::size_of::<FieldT>() <= mem::size_of::<Self>() &&
@@ -779,7 +777,7 @@ fn emit_field_mut(code: &mut Vec<TokenTree>, stru: &Structure, field: &Field) {
 	emit_ty(code, &field.ty);
 	emit_field_check(code, stru, field);
 	emit_group_f(code, Delimiter::Brace, |body| {
-		emit_text(body, &format!("const FIELD_OFFSET: usize = {};", field.layout.offset));
+		emit_text(body, &format!("const FIELD_OFFSET: usize = {};", field.layout.offset.0));
 		emit_text(body, "type FieldT = "); emit_ty(body, &field.ty);
 		emit_text(body, "; use ::core::mem; let _: [();
 			(FIELD_OFFSET + mem::size_of::<FieldT>() <= mem::size_of::<Self>() &&
