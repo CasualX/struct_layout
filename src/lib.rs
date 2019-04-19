@@ -330,11 +330,8 @@ fn parse_explicit_layout(tokens: TokenStream) -> ExplicitLayout {
 	let tokens: Vec<TokenTree> = tokens.into_iter().collect();
 	let mut tokens = tokens.into_iter();
 	let size = parse_layout_size(&mut tokens);
-	parse_layout_comma(&mut tokens);
 	let align = parse_layout_align(&mut tokens);
-	parse_layout_comma(&mut tokens);
 	let check = parse_layout_check(&mut tokens);
-	parse_layout_comma(&mut tokens);
 	parse_layout_end(&mut tokens);
 	ExplicitLayout { size, align, check }
 }
@@ -343,6 +340,9 @@ fn parse_layout_size(tokens: &mut vec::IntoIter<TokenTree>) -> usize {
 		Some(kv) => kv,
 		None => panic!("parse struct_layout: invalid format for size argument, expecting `size = <usize>`"),
 	};
+	if let None = parse_comma(tokens) {
+		panic!("parse struct_layout: invalid format for size argument, expecting `size = <usize>`");
+	}
 	let size = match attr_value.value.to_string().parse::<usize>() {
 		Ok(ok) => ok,
 		Err(err) => panic!("parse struct_layout: error parsing size argument: {}", err),
@@ -354,6 +354,9 @@ fn parse_layout_align(tokens: &mut vec::IntoIter<TokenTree>) -> usize {
 		Some(kv) => kv,
 		None => panic!("parse struct_layout: invalid format for align argument, expecting `align = <usize>`"),
 	};
+	if let None = parse_comma(tokens) {
+		panic!("parse struct_layout: invalid format for align argument, expecting `align = <usize>`");
+	}
 	let align = match attr_value.value.to_string().parse::<usize>() {
 		Ok(ok) => ok,
 		Err(err) => panic!("parse struct_layout: error parsing align argument: {}", err),
@@ -362,15 +365,13 @@ fn parse_layout_align(tokens: &mut vec::IntoIter<TokenTree>) -> usize {
 }
 fn parse_layout_check(tokens: &mut vec::IntoIter<TokenTree>) -> Option<String> {
 	let meta_v1 = parse_meta_v1(tokens)?;
+	if let None = parse_comma(tokens) {
+		panic!("parse struct_layout: invalid format for check argument, expecting `check(PodTrait..)`");
+	}
 	if meta_v1.ident.to_string() != "check" {
 		panic!("parse struct_layout: invalid format for check argument, expecting `check(PodTrait..)`");
 	}
 	Some(meta_v1.args.stream().to_string())
-}
-fn parse_layout_comma(tokens: &mut vec::IntoIter<TokenTree>) {
-	if let None = parse_comma(tokens) {
-		panic!("parse struct_layout: expecting comma separated list");
-	}
 }
 fn parse_layout_end(tokens: &mut vec::IntoIter<TokenTree>) {
 	if let None = parse_end(tokens) {
@@ -459,7 +460,8 @@ fn parse_field_layout(tokens: &mut vec::IntoIter<TokenTree>) -> FieldLayout {
 			Some(ident) => ident,
 			None => panic!("parse field_layout: expecting an identifier"),
 		};
-		match &*ident.to_string() {
+		let method = ident.to_string();
+		match &*method {
 			"get" => method_get = true,
 			"set" => method_set = true,
 			"ref" => method_ref = true,
@@ -467,7 +469,7 @@ fn parse_field_layout(tokens: &mut vec::IntoIter<TokenTree>) -> FieldLayout {
 			_ => panic!("parse field_layout: expecting an identifier of `get`, `set`, `ref` or `mut`"),
 		}
 		if let None = parse_comma(tokens) {
-			panic!("parse field_layout: expecting comma separated list");
+			panic!("parse field_layout: expecting comma after {}", method);
 		}
 	}
 	// If no methods are specified, enable all of them
@@ -533,15 +535,16 @@ fn parse_structure_attrs(attrs: &mut Vec<Attribute>) -> Vec<DerivedTrait> {
 								Some(ident) => ident,
 								None => panic!("derive attribute: expecting list of comma separated identifiers"),
 							};
-							if let None = parse_comma(&mut tokens) {
-								panic!("derive attribute: expecting list of comma separated identifiers");
-							}
-							match &*ident.to_string() {
+							let tr = ident.to_string();
+							match &*tr {
 								"Copy" => result.push(DerivedTrait::Copy),
 								"Clone" => result.push(DerivedTrait::Clone),
 								"Debug" => result.push(DerivedTrait::Debug),
 								"Default" => result.push(DerivedTrait::Default),
 								s => panic!("derive attribute: unsupported trait: `{}`", s),
+							}
+							if let None = parse_comma(&mut tokens) {
+								panic!("derive attribute: expecting comma after {}", tr);
 							}
 						}
 						// Strip the derive attribute as we'll implement it ourselves
