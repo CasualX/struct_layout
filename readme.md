@@ -26,6 +26,8 @@ Examples
 
 Apply the `#[struct_layout::explicit]` attribute to a struct definition and put `#[field]` attributes on every field declaration.
 
+The syntax takes inspiration from [C# `[StructLayout]` attribute](https://docs.microsoft.com/en-us/dotnet/api/system.runtime.interopservices.structlayoutattribute#examples).
+
 ```rust
 /// Doc comments are allowed.
 #[struct_layout::explicit(size = 32, align = 4)]
@@ -60,7 +62,7 @@ Because of the invasive nature of the transformation, only a small set of whitel
 
 ### The generated structure
 
-The proc macro generates a newtype tuple structure wrapping a byte array with length specified by the `size` argument.
+The proc-macro generates a newtype tuple structure wrapping a byte array with length specified by the `size` argument.
 The structure is adorned by the `C` and `align` representation with the alignment specified by the `align` argument.
 The visibility specified is applied to the generated structure.
 Any doc comments are also added.
@@ -70,7 +72,7 @@ Basically, this:
 ```rust
 /// Doc comments are allowed.
 #[repr(C, align(4))]
-pub struct Foo([u8; 64]);
+pub struct Foo([u8; 32]);
 ```
 
 ### Supported auto derived traits

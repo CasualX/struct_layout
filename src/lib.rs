@@ -104,7 +104,7 @@ struct FieldLayout {
 }
 
 #[derive(Clone, Debug)]
-struct MetaV1 {
+struct Meta {
 	ident: Ident,
 	args: Group,
 }
@@ -237,7 +237,8 @@ fn parse_end(tokens: &mut vec::IntoIter<TokenTree>) -> Option<()> {
 	}
 	Some(())
 }
-fn parse_meta_v1(tokens: &mut vec::IntoIter<TokenTree>) -> Option<MetaV1> {
+// $ident $group
+fn parse_meta(tokens: &mut vec::IntoIter<TokenTree>) -> Option<Meta> {
 	let slice = tokens.as_slice();
 	if !(is_ident(&slice[0..]) && is_group(&slice[1..], Delimiter::Parenthesis)) {
 		return None;
@@ -250,8 +251,9 @@ fn parse_meta_v1(tokens: &mut vec::IntoIter<TokenTree>) -> Option<MetaV1> {
 		Some(TokenTree::Group(group)) => group,
 		_ => unreachable!(),
 	};
-	Some(MetaV1 { ident, args })
+	Some(Meta { ident, args })
 }
+// $ident = $literal
 fn parse_kv(tokens: &mut vec::IntoIter<TokenTree>) -> Option<KeyValue> {
 	let slice = tokens.as_slice();
 	if !(is_ident(&slice[0..]) && is_punct(&slice[1..], '=') && is_literal(&slice[2..])) {
@@ -271,6 +273,7 @@ fn parse_kv(tokens: &mut vec::IntoIter<TokenTree>) -> Option<KeyValue> {
 	};
 	Some(KeyValue { ident, punct, value })
 }
+// # $group
 fn parse_attr(tokens: &mut vec::IntoIter<TokenTree>) -> Option<Attribute> {
 	if !is_punct(tokens.as_slice(), '#') {
 		return None;
@@ -285,6 +288,7 @@ fn parse_attr(tokens: &mut vec::IntoIter<TokenTree>) -> Option<Attribute> {
 	};
 	Some(Attribute { punct, meta })
 }
+// $(# $group)*
 fn parse_attrs(tokens: &mut vec::IntoIter<TokenTree>) -> Vec<Attribute> {
 	let mut attrs = Vec::new();
 	while let Some(attr) = parse_attr(tokens) {
@@ -292,6 +296,7 @@ fn parse_attrs(tokens: &mut vec::IntoIter<TokenTree>) -> Vec<Attribute> {
 	}
 	attrs
 }
+// $(pub $($group)?)?
 fn parse_vis(tokens: &mut vec::IntoIter<TokenTree>) -> Vis {
 	let mut vis = Vec::new();
 	if is_keyword(tokens.as_slice(), "pub") {
@@ -302,6 +307,7 @@ fn parse_vis(tokens: &mut vec::IntoIter<TokenTree>) -> Vis {
 	}
 	Vis(vis)
 }
+// $($tt)*,
 fn parse_ty(tokens: &mut vec::IntoIter<TokenTree>) -> Type {
 	let mut ty = Vec::new();
 	let mut depth = 0;
@@ -364,14 +370,14 @@ fn parse_layout_align(tokens: &mut vec::IntoIter<TokenTree>) -> usize {
 	align
 }
 fn parse_layout_check(tokens: &mut vec::IntoIter<TokenTree>) -> Option<String> {
-	let meta_v1 = parse_meta_v1(tokens)?;
+	let meta = parse_meta(tokens)?;
 	if let None = parse_comma(tokens) {
 		panic!("parse struct_layout: invalid format for check argument, expecting `check(PodTrait..)`");
 	}
-	if meta_v1.ident.to_string() != "check" {
+	if meta.ident.to_string() != "check" {
 		panic!("parse struct_layout: invalid format for check argument, expecting `check(PodTrait..)`");
 	}
-	Some(meta_v1.args.stream().to_string())
+	Some(meta.args.stream().to_string())
 }
 fn parse_layout_end(tokens: &mut vec::IntoIter<TokenTree>) {
 	if let None = parse_end(tokens) {
@@ -417,14 +423,14 @@ fn parse_field_attrs(attrs: &mut Vec<Attribute>) -> Option<FieldLayout> {
 			Some(TokenTree::Ident(ident)) => {
 				match &*ident.to_string() {
 					"field" => {
-						let meta_v1 = match parse_meta_v1(&mut tokens) {
-							Some(meta_v1) => meta_v1,
+						let meta = match parse_meta(&mut tokens) {
+							Some(meta) => meta,
 							None => panic!("parse field: invalid field attribute syntax, expecting `#[field(..)]`"),
 						};
 						if let None = parse_end(&mut tokens) {
 							panic!("parse field: found extra tokens after field attribute");
 						}
-						let tokens: Vec<TokenTree> = meta_v1.args.stream().into_iter().collect();
+						let tokens: Vec<TokenTree> = meta.args.stream().into_iter().collect();
 						let mut tokens = tokens.into_iter();
 						result = Some(parse_field_layout(&mut tokens));
 						false
@@ -521,33 +527,16 @@ fn parse_structure_attrs(attrs: &mut Vec<Attribute>) -> Vec<DerivedTrait> {
 			Some(TokenTree::Ident(ident)) => {
 				match &*ident.to_string() {
 					"derive" => {
-						let meta_v1 = match parse_meta_v1(&mut tokens) {
-							Some(meta_v1) => meta_v1,
+						let meta = match parse_meta(&mut tokens) {
+							Some(meta) => meta,
 							None => panic!("parse struct: invalid derive syntax, expecting `#[derive(..)]`"),
 						};
 						if let None = parse_end(&mut tokens) {
 							panic!("parse struct: found extra tokens after derive attribute");
 						}
-						let tokens: Vec<TokenTree> = meta_v1.args.stream().into_iter().collect();
+						let tokens: Vec<TokenTree> = meta.args.stream().into_iter().collect();
 						let mut tokens = tokens.into_iter();
-						while tokens.len() > 0 {
-							let ident = match parse_ident(&mut tokens) {
-								Some(ident) => ident,
-								None => panic!("derive attribute: expecting list of comma separated identifiers"),
-							};
-							let tr = ident.to_string();
-							match &*tr {
-								"Copy" => result.push(DerivedTrait::Copy),
-								"Clone" => result.push(DerivedTrait::Clone),
-								"Debug" => result.push(DerivedTrait::Debug),
-								"Default" => result.push(DerivedTrait::Default),
-								s => panic!("derive attribute: unsupported trait: `{}`", s),
-							}
-							if let None = parse_comma(&mut tokens) {
-								panic!("derive attribute: expecting comma after {}", tr);
-							}
-						}
-						// Strip the derive attribute as we'll implement it ourselves
+						parse_structure_derive(&mut tokens, &mut result);
 						false
 					},
 					"doc" => true,
@@ -560,10 +549,31 @@ fn parse_structure_attrs(attrs: &mut Vec<Attribute>) -> Vec<DerivedTrait> {
 	});
 	result
 }
+fn parse_structure_derive(tokens: &mut vec::IntoIter<TokenTree>, derived: &mut Vec<DerivedTrait>) {
+	while tokens.len() > 0 {
+		let ident = match parse_ident(tokens) {
+			Some(ident) => ident,
+			None => panic!("derive attribute: expecting list of comma separated identifiers"),
+		};
+		let tr = ident.to_string();
+		match &*tr {
+			"Copy" => derived.push(DerivedTrait::Copy),
+			"Clone" => derived.push(DerivedTrait::Clone),
+			"Debug" => derived.push(DerivedTrait::Debug),
+			"Default" => derived.push(DerivedTrait::Default),
+			s => panic!("derive attribute: unsupported trait: `{}`", s),
+		}
+		if let None = parse_comma(tokens) {
+			panic!("derive attribute: expecting comma after {}", tr);
+		}
+	}
+}
 
 //----------------------------------------------------------------
 
 /// Explicit field layout attribute.
+///
+/// For more information, see the crate-level documentation.
 #[proc_macro_attribute]
 pub fn explicit(attributes: TokenStream, input: TokenStream) -> TokenStream {
 	let layout = parse_explicit_layout(attributes);
@@ -785,6 +795,8 @@ fn emit_field_check(code: &mut Vec<TokenTree>, stru: &Structure, field: &Field) 
 	emit_punct(code, ':');
 	emit_text(code, check);
 }
+
+//----------------------------------------------------------------
 
 /// The following are incorrect usage of the explicit attribute.
 ///
