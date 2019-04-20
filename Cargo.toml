@@ -8,6 +8,7 @@ description = "Customize your struct layout with this one weird trick."
 documentation = "https://docs.rs/struct_layout"
 repository = "https://github.com/CasualX/struct_layout"
 readme = "readme.md"
+license = "MIT"
 
 keywords = ["explicit", "struct", "layout"]
 categories = []
